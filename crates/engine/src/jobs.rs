@@ -252,7 +252,17 @@ pub enum Started {
 /// Commands that never edit the active document, allowed while a job runs on it.
 fn independent_of_document(id: &str) -> bool {
     const PREFIXES: &[&str] = &["jobs.", "models.", "tools.", "view.", "window.", "help.", "brush.presets.", "gradient.presets."];
-    const IDS: &[&str] = &["file.new", "file.close", "file.closeAll", "edit.preferences", "edit.colorSettings", "edit.keyboardShortcuts", "edit.menus"];
+    const IDS: &[&str] = &[
+        "file.new",
+        "file.close",
+        "file.closeAll",
+        "edit.preferences",
+        "edit.colorSettings",
+        "edit.keyboardShortcuts",
+        "edit.menus",
+        "ai.previewInfo",
+        "ai.discard",
+    ];
     PREFIXES.iter().any(|p| id.starts_with(p)) || IDS.contains(&id)
 }
 

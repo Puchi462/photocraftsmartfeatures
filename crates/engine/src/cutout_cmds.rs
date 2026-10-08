@@ -19,7 +19,7 @@ const CMD: &str = "layer.removeBackground";
 const REFINE: RefineParams = RefineParams { radius: 2.0, smart_radius: true, smooth: 10.0, feather: 0.5, contrast: 10.0, shift_edge: 0.0 };
 
 /// Remove Background needs an unlocked pixel layer.
-fn check(doc: &Document, l: &Layer) -> std::result::Result<(), String> {
+pub(crate) fn check(doc: &Document, l: &Layer) -> std::result::Result<(), String> {
     if !matches!(l.content, LayerContent::Raster(_)) {
         return Err(format!("the layer is a {} layer, not a pixel layer", l.content.kind_name()));
     }

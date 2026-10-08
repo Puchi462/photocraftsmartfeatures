@@ -10,6 +10,7 @@
 pub mod actions_cmds;
 pub mod adjust_cmds;
 pub mod adjust_params;
+pub mod ai_smart_cmds;
 pub mod align_cmds;
 pub mod analysis_cmds;
 pub mod artboard_cmds;
@@ -290,6 +291,8 @@ pub struct Session {
     pub prefs: prefs::PrefsStore,
     /// Optional native model service, injected by a platform frontend. An ordinary/test/web
     /// session has none: creating a Session never downloads models or accesses a model directory.
+    pub(crate) ai_preview: Option<ai_smart_cmds::AiPreview>,
+    pub(crate) ai_preview_serial: u64,
     pub model_backend: Option<Arc<dyn photocraft_ml::InferenceBackend>>,
     /// Edit menu state: Fade source, custom shape library (see `edit_menu_cmds`).
     pub edit_state: edit_menu_cmds::EditState,
