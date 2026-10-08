@@ -2153,3 +2153,5 @@ cameraRaw	Color	Barvy
 	Remove download	Odstranit stažený model
 	Select Subject and Remove Background; detailed, soft edges	Vybrat objekt a odstranit pozadí; podrobné, měkké okraje
 	Object Selection; drag a box around the object	Výběr objektu; nakreslete rámeček kolem objektu
+Inference device	Inference device
+Release model memory	Release model memory

@@ -2130,3 +2130,5 @@ cameraRaw	Blending	混合
 	Remove download	刪除下載
 	Select Subject and Remove Background; detailed, soft edges	選取主體和移除背景；精細、柔和的邊緣
 	Object Selection; drag a box around the object	物件選取；拖曳矩形框以包圍物件
+Inference device	Inference device
+Release model memory	Release model memory

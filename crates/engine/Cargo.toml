@@ -11,6 +11,7 @@ workspace = true
 # Real-file corpus tests (opt-in; `cargo xtask test-corpus`). Fail when the corpus is missing.
 corpus = []
 local-ml = ["photocraft-ml/onnx"]
+local-ml-cuda = ["local-ml", "photocraft-ml/cuda"]
 
 [dependencies]
 photocraft-geom = { workspace = true }

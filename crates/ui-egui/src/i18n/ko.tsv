@@ -2737,3 +2737,5 @@ cameraRaw	Color	색상
 	Remove download	다운로드 삭제
 	Select Subject and Remove Background; detailed, soft edges	피사체 선택 및 배경 제거; 섬세하고 부드러운 가장자리
 	Object Selection; drag a box around the object	개체 선택; 개체 주위에 상자를 드래그하세요
+Inference device	Inference device
+Release model memory	Release model memory

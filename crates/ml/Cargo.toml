@@ -11,6 +11,7 @@ workspace = true
 default = []
 # Native C++ runtime at the I/O edge; never enabled by default or linked into wasm.
 onnx = ["dep:ort", "dep:ureq", "dep:sha2", "dep:tempfile"]
+cuda = ["onnx", "ort/cuda"]
 
 [dependencies]
 photocraft-algo = { workspace = true }

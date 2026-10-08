@@ -13,7 +13,7 @@ use crate::commands::CommandSpec;
 use crate::jobs::JobCtx;
 use crate::{EngineError, Result, Session};
 
-fn error(e: photocraft_ml::Error) -> EngineError {
+pub(crate) fn error(e: photocraft_ml::Error) -> EngineError {
     match e {
         photocraft_ml::Error::Cancelled => EngineError::Cancelled,
         e => EngineError::Other(e.to_string()),
@@ -98,10 +98,21 @@ pub(crate) fn infer_region(
     prompt: Prompt,
     ctx: &JobCtx,
 ) -> Result<Option<Region>> {
+    let mask = infer_mask(backend, id, source, doc, prompt, ctx)?;
+    mask_region(&mask, doc.bounds(), ctx)
+}
+
+pub(crate) fn infer_mask(
+    backend: &dyn InferenceBackend,
+    id: ModelId,
+    source: &dyn Sampler,
+    doc: &Document,
+    prompt: Prompt,
+    ctx: &JobCtx,
+) -> Result<photocraft_ml::AlphaMask> {
     let bounds = doc.bounds();
     let (w, h) = (bounds.width() as usize, bounds.height() as usize);
-    let n = w
-        .checked_mul(h)
+    w.checked_mul(h)
         .filter(|n| *n > 0 && *n <= 64_000_000)
         .ok_or_else(|| EngineError::Other("local models currently support canvases up to 64 megapixels".into()))?;
     ctx.check()?;
@@ -112,9 +123,19 @@ pub(crate) fn infer_region(
     let step = w.max(h).div_ceil(id.info().input_side).max(1);
     let image = sampler.rgb_scaled(bounds, step);
     ctx.check()?;
-    ctx.progress(0.1, "Running local model (CPU)");
-    let mask = ctx.stage(0.1, 0.85, "Running local model (CPU)", |ctl| backend.infer(id, &image, prompt, ctl)).map_err(error)?;
+    ctx.progress(0.1, "Running local model");
+    let mask = ctx.stage(0.1, 0.85, "Running local model", |ctl| backend.infer(id, &image, prompt, ctl)).map_err(error)?;
     mask.validate().map_err(error)?;
+    Ok(mask)
+}
+
+pub(crate) fn mask_region(mask: &photocraft_ml::AlphaMask, bounds: Rect, ctx: &JobCtx) -> Result<Option<Region>> {
+    mask.validate().map_err(error)?;
+    let (w, h) = (bounds.width() as usize, bounds.height() as usize);
+    let n = w
+        .checked_mul(h)
+        .filter(|n| *n > 0 && *n <= 64_000_000)
+        .ok_or_else(|| EngineError::Other("local models currently support canvases up to 64 megapixels".into()))?;
     let mut values = vec![0u8; n];
     for (y, row) in values.chunks_exact_mut(w).enumerate() {
         ctx.check()?;
@@ -151,7 +172,7 @@ impl Session {
                 "revision": m.revision, "installed": status.is_some_and(|s| s.installed), "busy": status.is_some_and(|s| s.busy)})
             })
             .collect();
-        json!({"available": self.model_backend.is_some(), "models": models})
+        json!({"available": self.model_backend.is_some(), "models": models, "device": self.model_backend.as_ref().map(|b| b.device())})
     }
 }
 
@@ -206,6 +227,37 @@ pub fn specs() -> Vec<CommandSpec> {
             params: "{} → {available,models:[{id,label,installed,busy,downloadBytes,license,revision,upstream,exportSource}]}",
             enabled: |_| Ok(()),
             run: |s, _| Ok(s.local_model_status()),
+            journal: false,
+        },
+        CommandSpec {
+            id: "models.device",
+            label: "Local Model Device",
+            menu: &[],
+            shortcut: None,
+            params: r#"{"provider":"cpu|auto|cuda"?} → {requested,active,cudaCompiled} (query or change device; releases cached sessions when changed)"#,
+            enabled: available,
+            run: |s, p| {
+                let backend = backend(s)?;
+                if let Some(provider) = p.get("provider") {
+                    let provider = serde_json::from_value(provider.clone())
+                        .map_err(|_| EngineError::BadParams { cmd: "models.device".into(), msg: "provider must be cpu|auto|cuda".into() })?;
+                    backend.configure(provider).map_err(error)?;
+                }
+                Ok(json!(backend.device()))
+            },
+            journal: false,
+        },
+        CommandSpec {
+            id: "models.release",
+            label: "Release Local Model Memory",
+            menu: &[],
+            shortcut: None,
+            params: "{} (release loaded sessions and image embeddings; installed models remain available offline)",
+            enabled: available,
+            run: |s, _| {
+                backend(s)?.release().map_err(error)?;
+                Ok(json!({"released": true}))
+            },
             journal: false,
         },
         CommandSpec {

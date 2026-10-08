@@ -2591,3 +2591,5 @@ cameraRaw	Whites	Brancos
 	Remove download	Remover download
 	Select Subject and Remove Background; detailed, soft edges	Selecionar assunto e remover fundo; bordas suaves e detalhadas
 	Object Selection; drag a box around the object	Seleção de objeto; arraste uma caixa ao redor do objeto
+Inference device	Inference device
+Release model memory	Release model memory

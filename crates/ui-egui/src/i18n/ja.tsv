@@ -2136,3 +2136,5 @@ cameraRaw	Color	カラー
 	Remove download	ダウンロードを削除
 	Select Subject and Remove Background; detailed, soft edges	被写体を選択して背景を削除。細部を保った柔らかなエッジ
 	Object Selection; drag a box around the object	オブジェクト選択。オブジェクトを囲む矩形をドラッグ
+Inference device	Inference device
+Release model memory	Release model memory

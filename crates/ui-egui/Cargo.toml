@@ -10,6 +10,7 @@ workspace = true
 [features]
 default = []
 local-ml = ["photocraft-engine/local-ml"]
+local-ml-cuda = ["local-ml", "photocraft-engine/local-ml-cuda"]
 
 [dependencies]
 photocraft-geom = { workspace = true }

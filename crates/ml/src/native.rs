@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use ureq::unversioned::transport::{Buffers, ConnectionDetails, Connector, DefaultConnector, NextTimeout, Transport};
 
 use crate::catalog::Artifact;
-use crate::{AlphaMask, Error, InferenceBackend, MaskKind, ModelId, ModelStatus, Prompt, Result, check, normalize};
+use crate::{AlphaMask, DeviceStatus, Error, InferenceBackend, MaskKind, ModelId, ModelStatus, ObjectPrompt, Prompt, Provider, Result, check, normalize};
 
 impl<T> From<ort::Error<T>> for Error {
     fn from(e: ort::Error<T>) -> Self {
@@ -28,16 +28,34 @@ pub struct NativeBackend {
     root: PathBuf,
     operations: [Mutex<()>; 2],
     sessions: Mutex<Option<Loaded>>,
+    provider: Mutex<Provider>,
 }
 
 enum Sessions {
     BiRefNet(OnnxSession),
-    Sam2 { encoder: OnnxSession, decoder: OnnxSession },
+    Sam2 { encoder: OnnxSession, decoder: OnnxSession, embedding: Option<SamEmbedding> },
 }
 
 struct Loaded {
     id: ModelId,
     sessions: Sessions,
+    active: Provider,
+}
+
+struct Embedding {
+    shape: Vec<i64>,
+    values: Vec<f32>,
+}
+
+struct SamEmbedding {
+    key: [u8; 32],
+    tensors: [Embedding; 3],
+}
+
+impl Embedding {
+    fn tensor(&self) -> Result<Tensor<f32>> {
+        Ok(Tensor::from_array((self.shape.clone(), self.values.clone().into_boxed_slice()))?)
+    }
 }
 
 /// ureq's body timeout covers the whole download, rather than each read. Keep large downloads
@@ -77,7 +95,7 @@ impl Transport for IdleTransport {
 
 impl NativeBackend {
     pub fn new(root: PathBuf) -> Self {
-        Self { root, operations: Default::default(), sessions: Mutex::new(None) }
+        Self { root, operations: Default::default(), sessions: Mutex::new(None), provider: Mutex::new(Provider::Cpu) }
     }
 
     fn directory(&self, id: ModelId) -> PathBuf {
@@ -119,6 +137,31 @@ impl NativeBackend {
 }
 
 impl InferenceBackend for NativeBackend {
+    fn device(&self) -> DeviceStatus {
+        let requested = *self.provider.lock().unwrap_or_else(PoisonError::into_inner);
+        let active = self.sessions.try_lock().ok().and_then(|l| l.as_ref().map(|l| l.active)).unwrap_or(Provider::Cpu);
+        DeviceStatus { requested, active, cuda_compiled: cfg!(feature = "cuda") }
+    }
+
+    fn configure(&self, provider: Provider) -> Result<()> {
+        if provider == Provider::Cuda && !cfg!(feature = "cuda") {
+            return Err(Error::Unavailable("CUDA is not enabled in this build; rebuild with local-ml-cuda or choose CPU/Auto".into()));
+        }
+        let mut loaded = self.sessions.try_lock().map_err(|_| Error::Unavailable("wait for inference to finish before changing device".into()))?;
+        let mut current = self.provider.lock().unwrap_or_else(PoisonError::into_inner);
+        if *current != provider {
+            *loaded = None;
+            *current = provider;
+        }
+        Ok(())
+    }
+
+    fn release(&self) -> Result<()> {
+        let mut loaded = self.sessions.try_lock().map_err(|_| Error::Unavailable("wait for inference to finish before releasing models".into()))?;
+        *loaded = None;
+        Ok(())
+    }
+
     fn status(&self) -> Vec<ModelStatus> {
         crate::MODELS
             .iter()
@@ -212,7 +255,7 @@ impl InferenceBackend for NativeBackend {
 
     fn infer(&self, id: ModelId, image: &RgbImage, prompt: Prompt, ctl: &Interrupt<'_>) -> Result<AlphaMask> {
         let _guard = self.operation(id)?;
-        validate_prompt(id, prompt)?;
+        validate_prompt(id, &prompt)?;
         let input = normalize(image, id.info().input_side, ctl)?;
         self.verify(id, ctl)?;
         let mut loaded = match self.sessions.try_lock() {
@@ -229,20 +272,23 @@ impl InferenceBackend for NativeBackend {
             *loaded = None;
             check(ctl)?;
             let dir = self.directory(id);
+            let provider = *self.provider.lock().unwrap_or_else(PoisonError::into_inner);
+            let (first, active) = provider_session(&dir.join(if id == ModelId::BiRefNet { "model.onnx" } else { "vision_encoder.onnx" }), provider)?;
             let sessions = match id {
-                ModelId::BiRefNet => Sessions::BiRefNet(session(&dir.join("model.onnx"))?),
+                ModelId::BiRefNet => Sessions::BiRefNet(first),
                 ModelId::Sam2 => {
-                    Sessions::Sam2 { encoder: session(&dir.join("vision_encoder.onnx"))?, decoder: session(&dir.join("prompt_encoder_mask_decoder.onnx"))? }
+                    let (decoder, _) = provider_session(&dir.join("prompt_encoder_mask_decoder.onnx"), active)?;
+                    Sessions::Sam2 { encoder: first, decoder, embedding: None }
                 }
             };
-            *loaded = Some(Loaded { id, sessions });
+            *loaded = Some(Loaded { id, sessions, active });
         }
         check(ctl)?;
         ctl.progress(0.2);
         let current = loaded.as_mut().ok_or_else(|| Error::Inference("model did not load".into()))?;
         let result = match &mut current.sessions {
             Sessions::BiRefNet(model) => birefnet(model, input, ctl),
-            Sessions::Sam2 { encoder, decoder } => sam2(encoder, decoder, input, prompt, ctl),
+            Sessions::Sam2 { encoder, decoder, embedding } => sam2(encoder, decoder, embedding, input, prompt, ctl),
         }?;
         result.validate()?;
         check(ctl)?;
@@ -251,27 +297,54 @@ impl InferenceBackend for NativeBackend {
     }
 }
 
-fn validate_prompt(id: ModelId, p: Prompt) -> Result<()> {
+fn validate_prompt(id: ModelId, p: &Prompt) -> Result<()> {
     match (id, p) {
         (ModelId::BiRefNet, Prompt::Subject) => Ok(()),
-        (ModelId::Sam2, Prompt::Box([x0, y0, x1, y1])) if [x0, y0, x1, y1].iter().all(|v| v.is_finite() && (0.0..=1.0).contains(v)) && x0 < x1 && y0 < y1 => {
-            Ok(())
-        }
+        (ModelId::Sam2, Prompt::Object(object)) => object.validate(),
+        (ModelId::Sam2, Prompt::Box(bounds)) => ObjectPrompt { bounds: *bounds, points: vec![] }.validate(),
         _ => Err(Error::Input("this model does not support the requested prompt".into())),
     }
 }
 
+#[cfg(test)]
 fn session(path: &Path) -> Result<OnnxSession> {
+    Ok(provider_session(path, Provider::Cpu)?.0)
+}
+
+fn provider_session(path: &Path, requested: Provider) -> Result<(OnnxSession, Provider)> {
+    #[cfg(feature = "cuda")]
+    if requested != Provider::Cpu {
+        let attempt = OnnxSession::builder()?.with_execution_providers([ort::ep::CUDA::default()
+            .with_memory_limit(6 * 1024 * 1024 * 1024)
+            .with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Heuristic)
+            .with_conv_max_workspace(false)
+            .build()
+            .error_on_failure()]);
+        match attempt.and_then(|s| s.with_memory_pattern(false)?.with_optimization_level(GraphOptimizationLevel::Level3)?.commit_from_file(path)) {
+            Ok(s) => return Ok((s, Provider::Cuda)),
+            Err(e) if requested == Provider::Cuda => {
+                return Err(Error::Inference(format!("CUDA could not load the model: {e}; check ONNX Runtime GPU/CUDA/cuDNN or choose CPU")));
+            }
+            Err(_) => {} // Auto explicitly permits CPU fallback.
+        }
+    }
+    #[cfg(not(feature = "cuda"))]
+    if requested == Provider::Cuda {
+        return Err(Error::Unavailable("CUDA is not compiled into this build".into()));
+    }
     let threads = std::thread::available_parallelism().map_or(2, |v| v.get()).clamp(1, 8);
     // Keeping weights resident is useful, but retaining peak 2048px intermediates in an arena
     // (then allocating a contiguous memory-pattern block on the second run) can exhaust RAM.
     // Prefer releasing temporary buffers over latency: these models are explicitly optional.
-    Ok(OnnxSession::builder()?
-        .with_execution_providers([ort::ep::CPU::default().with_arena_allocator(false).build()])?
-        .with_memory_pattern(false)?
-        .with_intra_threads(threads)?
-        .with_optimization_level(GraphOptimizationLevel::Level3)?
-        .commit_from_file(path)?)
+    Ok((
+        OnnxSession::builder()?
+            .with_execution_providers([ort::ep::CPU::default().with_arena_allocator(false).build()])?
+            .with_memory_pattern(false)?
+            .with_intra_threads(threads)?
+            .with_optimization_level(GraphOptimizationLevel::Level3)?
+            .commit_from_file(path)?,
+        Provider::Cpu,
+    ))
 }
 
 /// ORT supports terminating a run from another thread. The watcher exits at completion or
@@ -321,33 +394,61 @@ fn birefnet(model: &mut OnnxSession, input: Vec<f32>, ctl: &Interrupt<'_>) -> Re
     })
 }
 
-fn sam2(encoder: &mut OnnxSession, decoder: &mut OnnxSession, input: Vec<f32>, prompt: Prompt, ctl: &Interrupt<'_>) -> Result<AlphaMask> {
-    let Prompt::Box(bbox) = prompt else { return Err(Error::Input("SAM needs a box".into())) };
-    let image = Tensor::from_array(([1usize, 3, 1024, 1024], input.into_boxed_slice()))?;
-    let (e0, e1, e2) = cancellable(ctl, |options| {
-        let outputs = encoder.run_with_options(ort::inputs!["pixel_values" => image], options)?;
-        let embedding = |name| -> Result<Tensor<f32>> {
-            let v = outputs.get(name).ok_or_else(|| Error::Inference(format!("SAM export has no {name} output")))?;
-            let (shape, values) = v.try_extract_tensor::<f32>()?;
-            Ok(Tensor::from_array((shape.to_vec(), values.to_vec().into_boxed_slice()))?)
-        };
-        Ok((embedding("image_embeddings.0")?, embedding("image_embeddings.1")?, embedding("image_embeddings.2")?))
-    })?;
+fn sam2(
+    encoder: &mut OnnxSession,
+    decoder: &mut OnnxSession,
+    cache: &mut Option<SamEmbedding>,
+    input: Vec<f32>,
+    prompt: Prompt,
+    ctl: &Interrupt<'_>,
+) -> Result<AlphaMask> {
+    let object = match prompt {
+        Prompt::Box(bounds) => ObjectPrompt { bounds, points: vec![] },
+        Prompt::Object(object) => object,
+        _ => return Err(Error::Input("SAM needs object prompts".into())),
+    };
+    let (coordinates, point_labels) = object.tensors()?;
+    let mut hash = Sha256::new();
+    for value in &input {
+        hash.update(value.to_le_bytes());
+    }
+    let key: [u8; 32] = hash.finalize().into();
+    if cache.as_ref().is_none_or(|e| e.key != key) {
+        // Discard an old image before allocating the new one. Never accumulate image caches.
+        *cache = None;
+        let image = Tensor::from_array(([1usize, 3, 1024, 1024], input.into_boxed_slice()))?;
+        let tensors = cancellable(ctl, |options| {
+            let outputs = encoder.run_with_options(ort::inputs!["pixel_values" => image], options)?;
+            let embedding = |name| -> Result<Embedding> {
+                let v = outputs.get(name).ok_or_else(|| Error::Inference(format!("SAM export has no {name} output")))?;
+                let (shape, values) = v.try_extract_tensor::<f32>()?;
+                if values.len() > 8_388_608 || values.iter().any(|v| !v.is_finite()) {
+                    return Err(Error::Inference("invalid or oversized SAM image embedding".into()));
+                }
+                Ok(Embedding { shape: shape.to_vec(), values: values.to_vec() })
+            };
+            Ok([embedding("image_embeddings.0")?, embedding("image_embeddings.1")?, embedding("image_embeddings.2")?])
+        })?;
+        check(ctl)?;
+        *cache = Some(SamEmbedding { key, tensors });
+    }
+    let [e0, e1, e2] = &cache.as_ref().ok_or_else(|| Error::Inference("SAM image was not encoded".into()))?.tensors;
     ctl.progress(0.85);
     // A padding point is ignored by SAM; the box supplies corner labels 2 and 3 inside the
     // decoder. The reviewed export uses int64 labels and coordinates on its 1024-pixel square.
-    let points = Tensor::from_array(([1usize, 1, 1, 2], vec![0.0f32; 2].into_boxed_slice()))?;
-    let labels = Tensor::from_array(([1usize, 1, 1], vec![-1i64].into_boxed_slice()))?;
-    let boxes = Tensor::from_array(([1usize, 1, 4], bbox.map(|v| v * 1024.0).to_vec().into_boxed_slice()))?;
+    let count = point_labels.len();
+    let points = Tensor::from_array(([1usize, 1, count, 2], coordinates.into_boxed_slice()))?;
+    let labels = Tensor::from_array(([1usize, 1, count], point_labels.into_boxed_slice()))?;
+    let boxes = Tensor::from_array(([1usize, 1, 4], object.bounds.map(|v| v * 1024.0).to_vec().into_boxed_slice()))?;
     cancellable(ctl, |options| {
         let outputs = decoder.run_with_options(
             ort::inputs![
             "input_points" => points,
             "input_labels" => labels,
             "input_boxes" => boxes,
-            "image_embeddings.0" => e0,
-            "image_embeddings.1" => e1,
-            "image_embeddings.2" => e2,
+            "image_embeddings.0" => e0.tensor()?,
+            "image_embeddings.1" => e1.tensor()?,
+            "image_embeddings.2" => e2.tensor()?,
             ],
             options,
         )?;
@@ -459,10 +560,34 @@ mod tests {
         assert!(alpha.values.iter().all(|v| (*v - 0.5).abs() < 1e-6));
         let mut encoder = session(&dir.path().join("encoder.onnx")).unwrap();
         let mut decoder = session(&dir.path().join("decoder.onnx")).unwrap();
-        let mask = sam2(&mut encoder, &mut decoder, vec![0.0; 3 * 1024 * 1024], Prompt::Box([0.1, 0.2, 0.9, 0.8]), &Interrupt::NONE).unwrap();
+        let mut cache = None;
+        let mask = sam2(&mut encoder, &mut decoder, &mut cache, vec![0.0; 3 * 1024 * 1024], Prompt::Box([0.1, 0.2, 0.9, 0.8]), &Interrupt::NONE).unwrap();
         assert_eq!(mask.kind, MaskKind::Logits);
         assert_eq!(mask.values, vec![1.0, 2.0]);
+        let first = cache.as_ref().unwrap().tensors[0].values.as_ptr();
+        let first_key = cache.as_ref().unwrap().key;
+        let prompt = Prompt::Object(ObjectPrompt {
+            bounds: [0.1, 0.2, 0.9, 0.8],
+            points: vec![crate::PointPrompt { position: [0.5, 0.5], positive: true }, crate::PointPrompt { position: [0.2, 0.2], positive: false }],
+        });
+        sam2(&mut encoder, &mut decoder, &mut cache, vec![0.0; 3 * 1024 * 1024], prompt, &Interrupt::NONE).unwrap();
+        assert_eq!(first, cache.as_ref().unwrap().tensors[0].values.as_ptr(), "point refinement must reuse the encoded image");
+        sam2(&mut encoder, &mut decoder, &mut cache, vec![0.1; 3 * 1024 * 1024], Prompt::Box([0.1, 0.2, 0.9, 0.8]), &Interrupt::NONE).unwrap();
+        assert_ne!(first_key, cache.as_ref().unwrap().key, "an edited image invalidates the embedding");
         assert!(matches!(birefnet(&mut matte, vec![0.0; 3 * 2048 * 2048], &Interrupt::cancel_only(&|| true)), Err(Error::Cancelled)));
+    }
+
+    #[test]
+    fn cpu_fallback_and_release_are_explicit_and_do_not_download() {
+        let temp = tempfile::tempdir().unwrap();
+        let backend = NativeBackend::new(temp.path().join("models"));
+        backend.configure(Provider::Auto).unwrap();
+        assert_eq!(backend.device().requested, Provider::Auto);
+        assert_eq!(backend.device().active, Provider::Cpu);
+        backend.release().unwrap();
+        assert!(!temp.path().join("models").exists());
+        #[cfg(not(feature = "cuda"))]
+        assert!(backend.configure(Provider::Cuda).is_err());
     }
 
     #[test]
@@ -510,7 +635,7 @@ mod tests {
         assert_eq!(m.values, vec![1.0, 2.0]);
         assert!(sam_mask(&[1, 1, i64::MAX, 1, 2], &[], &[]).is_err());
         assert!(sam_mask(&[1, 1, 1, 1, 2], &[0.0], &[1.0]).is_err());
-        assert!(validate_prompt(ModelId::Sam2, Prompt::Box([0.0, 0.0, f32::NAN, 1.0])).is_err());
+        assert!(validate_prompt(ModelId::Sam2, &Prompt::Box([0.0, 0.0, f32::NAN, 1.0])).is_err());
     }
 
     /// Explicit developer opt-in only. No normal test or first launch downloads weights.

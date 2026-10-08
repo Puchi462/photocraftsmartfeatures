@@ -903,6 +903,25 @@ fn local_model_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, obj: &mut Map<St
         ui.label(RichText::new(tl!("Local models aren't available in this build or session.")).color(t.text_faint));
     }
     ui.add_space(6.0);
+    if available {
+        ui.horizontal(|ui| {
+            ui.label(tl!("Inference device"));
+            let current = status["device"]["requested"].as_str().unwrap_or("cpu");
+            let mut selected = current.to_string();
+            egui::ComboBox::from_id_salt("local-model-device").selected_text(selected.to_uppercase()).show_ui(ui, |ui| {
+                for provider in ["cpu", "auto", "cuda"] {
+                    let enabled = provider != "cuda" || status["device"]["cudaCompiled"].as_bool().unwrap_or(false);
+                    ui.add_enabled_ui(enabled, |ui| ui.selectable_value(&mut selected, provider.into(), provider.to_uppercase()));
+                }
+            });
+            if selected != current {
+                let _ = app.run("models.device", json!({"provider": selected}));
+            }
+            if crate::widgets::secondary_button(ui, tl!("Release model memory"), 0.0).clicked() {
+                let _ = app.run("models.release", json!({}));
+            }
+        });
+    }
     for model in status["models"].as_array().into_iter().flatten() {
         let id = model["id"].as_str().unwrap_or_default();
         let label = model["label"].as_str().unwrap_or_default();

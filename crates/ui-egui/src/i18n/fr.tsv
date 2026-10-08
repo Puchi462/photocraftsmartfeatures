@@ -2584,3 +2584,5 @@ cameraRaw	Blending	Fusion
 	Remove download	Supprimer le téléchargement
 	Select Subject and Remove Background; detailed, soft edges	Sélectionner le sujet et supprimer l’arrière-plan ; contours fins et doux
 	Object Selection; drag a box around the object	Sélection d’objet ; tracer un cadre autour de l’objet
+Inference device	Inference device
+Release model memory	Release model memory

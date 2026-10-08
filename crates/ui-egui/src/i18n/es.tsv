@@ -2224,3 +2224,5 @@ cameraRaw	Amount	Cantidad
 	Remove download	Eliminar descarga
 	Select Subject and Remove Background; detailed, soft edges	Seleccionar sujeto y eliminar fondo; bordes suaves y detallados
 	Object Selection; drag a box around the object	Selección de objetos; dibuja un recuadro alrededor del objeto
+Inference device	Dispositivo de inferencia
+Release model memory	Liberar memoria de modelos

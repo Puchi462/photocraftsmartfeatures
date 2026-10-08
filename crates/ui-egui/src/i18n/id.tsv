@@ -2571,3 +2571,5 @@ cameraRaw	Blending	Pembauran
 	Remove download	Hapus unduhan
 	Select Subject and Remove Background; detailed, soft edges	Pilih Subjek dan Hapus Latar Belakang; tepi halus dan terperinci
 	Object Selection; drag a box around the object	Pemilihan Objek; seret kotak di sekitar objek
+Inference device	Inference device
+Release model memory	Release model memory

@@ -10,6 +10,7 @@ license.workspace = true
 # it; official builds (CI, packaging/, release) build with `--features heif`.
 heif = ["photocraft-codecs/heif"]
 local-ml = ["photocraft-engine/local-ml"]
+local-ml-cuda = ["local-ml", "photocraft-engine/local-ml-cuda"]
 
 [lints]
 workspace = true

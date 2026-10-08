@@ -2427,3 +2427,5 @@ cameraRaw	Roughness	Неровность
 	Remove download	Удалить скачанное
 	Select Subject and Remove Background; detailed, soft edges	Выделение объекта и удаление фона; детализированные мягкие края
 	Object Selection; drag a box around the object	Выделение объекта; обведите объект прямоугольником
+Inference device	Inference device
+Release model memory	Release model memory
