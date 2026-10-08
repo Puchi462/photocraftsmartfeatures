@@ -18,7 +18,16 @@ use crate::{AlphaMask, DeviceStatus, Error, InferenceBackend, MaskKind, ModelId,
 
 impl<T> From<ort::Error<T>> for Error {
     fn from(e: ort::Error<T>) -> Self {
-        Self::Inference(e.to_string())
+        let message = e.to_string();
+        let lower = message.to_ascii_lowercase();
+        let memory = lower.contains("out of memory") || lower.contains("failed to allocate") || lower.contains("bad_alloc");
+        Self::Inference(if memory {
+            format!(
+                "{message}. Release loaded models and close other memory-intensive applications; if using CUDA, choose CPU in Preferences › Integrations and retry. These fixed-resolution FP32 models require several GB of RAM."
+            )
+        } else {
+            message
+        })
     }
 }
 
@@ -314,13 +323,19 @@ fn session(path: &Path) -> Result<OnnxSession> {
 fn provider_session(path: &Path, requested: Provider) -> Result<(OnnxSession, Provider)> {
     #[cfg(feature = "cuda")]
     if requested != Provider::Cpu {
-        let attempt = OnnxSession::builder()?.with_execution_providers([ort::ep::CUDA::default()
-            .with_memory_limit(6 * 1024 * 1024 * 1024)
-            .with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Heuristic)
-            .with_conv_max_workspace(false)
-            .build()
-            .error_on_failure()]);
-        match attempt.and_then(|s| s.with_memory_pattern(false)?.with_optimization_level(GraphOptimizationLevel::Level3)?.commit_from_file(path)) {
+        let attempt: Result<OnnxSession> = (|| {
+            Ok(OnnxSession::builder()?
+                .with_execution_providers([ort::ep::CUDA::default()
+                    .with_memory_limit(6 * 1024 * 1024 * 1024)
+                    .with_conv_algorithm_search(ort::ep::cuda::ConvAlgorithmSearch::Heuristic)
+                    .with_conv_max_workspace(false)
+                    .build()
+                    .error_on_failure()])?
+                .with_memory_pattern(false)?
+                .with_optimization_level(GraphOptimizationLevel::Level3)?
+                .commit_from_file(path)?)
+        })();
+        match attempt {
             Ok(s) => return Ok((s, Provider::Cuda)),
             Err(e) if requested == Provider::Cuda => {
                 return Err(Error::Inference(format!("CUDA could not load the model: {e}; check ONNX Runtime GPU/CUDA/cuDNN or choose CPU")));
