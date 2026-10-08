@@ -745,7 +745,7 @@ pub fn body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Valu
     match f.get("__prefsui").and_then(Value::as_str).unwrap_or("") {
         "prefs" => {
             f.insert("__gpuInfo".into(), json!(app.perf.gpu_info.lines()));
-            prefs_body(ui, f);
+            prefs_body(app, ui, f);
         }
         "shortcuts" => shortcuts_body(app, ui, f),
         "presets" => presets_body(app, ui, f),
@@ -784,6 +784,9 @@ fn choice_label(v: &str) -> String {
         "metal" => "Metal".into(),
         "gl" => "OpenGL".into(),
         "cpu" => "CPU (no GPU acceleration)".into(),
+        "classical" => "Classical (built in)".into(),
+        "birefnet-hr-matting" => "BiRefNet HR Matting".into(),
+        "sam2.1-large" => "SAM 2.1 Large".into(),
         v => humanize(v),
     }
 }
@@ -812,7 +815,7 @@ fn color_of(s: &str) -> Color32 {
 }
 
 /// Preferences: section list on the left, the section's settings on the right.
-fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
+fn prefs_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     let t = Tokens::get(ui.ctx());
     let mut section = f.get("section").and_then(Value::as_str).unwrap_or("general").to_string();
     let mut values = f.get("values").cloned().unwrap_or(Value::Null);
@@ -864,9 +867,12 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
                     ui.add_space(4.0);
                     ui.label(RichText::new(tl!("These settings aren't available in PhotoCraft yet.")).color(t.text_faint));
                 } else if let Some(obj) = values.get_mut(&section).and_then(Value::as_object_mut) {
-                    section_fields(ui, &section, obj, &order, lang);
+                    section_fields(ui, &section, obj, &order, lang, &app.session.local_model_status());
                     if section == "performance" {
                         gpu_status_rows(ui, f.get("__gpuInfo"), obj);
+                    }
+                    if section == "integrations" {
+                        local_model_rows(app, ui, obj);
                     }
                     ui.add_space(8.0);
                 }
@@ -881,6 +887,60 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>) {
     });
     f.insert("section".into(), json!(section));
     f.insert("values".into(), values);
+}
+
+/// The catalogue and lifecycle come from the engine. Downloads/removals are immediate jobs;
+/// model choices are preferences, committed by the dialog's existing Apply/OK controls.
+fn local_model_rows(app: &mut PhotocraftApp, ui: &mut egui::Ui, obj: &mut Map<String, Value>) {
+    let t = Tokens::get(ui.ctx());
+    let status = app.session.local_model_status();
+    let available = status["available"].as_bool().unwrap_or(false);
+    ui.add_space(10.0);
+    ui.label(RichText::new(tl!("Local selection models")).font(crate::theme::semibold(12.5)).color(t.text));
+    ui.label(RichText::new(tl!("Models run on this device. Images stay on this device.")).color(t.text_dim));
+    ui.label(RichText::new(tl!("Download a model before choosing it. Downloads do not change the current method.")).color(t.text_dim));
+    if !available {
+        ui.label(RichText::new(tl!("Local models aren't available in this build or session.")).color(t.text_faint));
+    }
+    ui.add_space(6.0);
+    for model in status["models"].as_array().into_iter().flatten() {
+        let id = model["id"].as_str().unwrap_or_default();
+        let label = model["label"].as_str().unwrap_or_default();
+        let installed = model["installed"].as_bool().unwrap_or(false);
+        let busy = model["busy"].as_bool().unwrap_or(false);
+        let mib = model["downloadBytes"].as_u64().unwrap_or(0).div_ceil(1024 * 1024);
+        ui.push_id(id, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(label).color(t.text));
+                ui.label(
+                    RichText::new(if busy {
+                        tl!("In use…")
+                    } else if installed {
+                        tl!("Downloaded")
+                    } else {
+                        tl!("Not downloaded")
+                    })
+                    .color(t.text_faint),
+                );
+            });
+            ui.label(RichText::new(tl!(model["purpose"].as_str().unwrap_or_default())).color(t.text_dim));
+            ui.horizontal(|ui| {
+                let button = if installed { tl!("Remove download").to_string() } else { format!("{} ({mib} MiB)", tl!("Download")) };
+                let clicked = ui.add_enabled_ui(available && !busy, |ui| crate::widgets::secondary_button(ui, &button, 190.0).clicked()).inner;
+                if clicked {
+                    let command = if installed { "models.remove" } else { "models.download" };
+                    if app.run(command, json!({"id": id})).is_ok() && installed {
+                        let pref = if id == "sam2.1-large" { "objectModel" } else { "subjectModel" };
+                        obj.insert(pref.into(), json!("classical"));
+                    }
+                }
+                ui.hyperlink_to(model["license"].as_str().unwrap_or_default(), model["upstream"].as_str().unwrap_or_default());
+                ui.hyperlink_to(tl!("Model details"), model["exportSource"].as_str().unwrap_or_default());
+            });
+            ui.add_space(8.0);
+        });
+    }
+    ui.label(RichText::new(tl!("Large models can take time and use several GB of memory. Progress and Cancel appear in the status bar.")).color(t.text_faint));
 }
 
 /// Preferences › Performance: what the app renders with now, and a reset of the GPU backend
@@ -942,7 +1002,21 @@ fn has_visible_fields(values: &Value, section: &str) -> bool {
 
 /// Generic editor for a section's fields: checkboxes, dropdowns for choices, colour swatches,
 /// number fields with the preference's range, text fields.
-fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, order: &[String], lang: crate::i18n::Lang) {
+fn field_label(section: &str, key: &str) -> String {
+    match (section, key) {
+        ("integrations", "subjectModel") => "Subject / background removal".into(),
+        ("integrations", "objectModel") => "Object selection".into(),
+        _ => humanize(key),
+    }
+}
+
+fn model_choice_available(status: &Value, option: &str) -> bool {
+    option == "classical"
+        || (status["available"].as_bool().unwrap_or(false)
+            && status["models"].as_array().into_iter().flatten().any(|m| m["id"].as_str() == Some(option) && m["installed"].as_bool() == Some(true)))
+}
+
+fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>, order: &[String], lang: crate::i18n::Lang, models: &Value) {
     let t = Tokens::get(ui.ctx());
     if section == "performance" {
         rendering_mode_row(ui, obj);
@@ -958,7 +1032,7 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
                 continue;
             }
             let v = obj.get(&k).cloned().unwrap_or(Value::Null);
-            let human = humanize(&k);
+            let human = field_label(section, &k);
             let label = tl!(&human).to_string();
             match &v {
                 Value::Bool(b) => {
@@ -977,7 +1051,14 @@ fn section_fields(ui: &mut egui::Ui, section: &str, obj: &mut Map<String, Value>
                 }
                 Value::String(s) if prefs::choices(&path).is_some() => {
                     ui.label(RichText::new(tl!(&label)).color(t.text_dim));
-                    let opts = prefs::choices(&path).unwrap_or(&[]);
+                    let opts: Vec<&str> = prefs::choices(&path)
+                        .unwrap_or(&[])
+                        .iter()
+                        .copied()
+                        .filter(|v| {
+                            !matches!(path.as_str(), "integrations.subjectModel" | "integrations.objectModel") || *v == s || model_choice_available(models, v)
+                        })
+                        .collect();
                     let labels: Vec<String> = opts.iter().map(|o| choice_label(o)).collect();
                     let pairs: Vec<(String, &str)> = opts.iter().map(|o| o.to_string()).zip(labels.iter().map(String::as_str)).collect();
                     let mut cur = s.clone();
@@ -1440,6 +1521,17 @@ mod tests {
         let automatic = serde_json::json!({"renderingMode": null, "useGpu": true, "gpuBackend": "auto"});
         assert_eq!(super::rendering_mode_value(automatic.as_object().unwrap()), "auto");
     }
+
+    #[test]
+    fn local_model_choices_need_a_backend_and_a_download() {
+        assert!(model_choice_available(&json!({"available":false}), "classical"));
+        assert!(!model_choice_available(&json!({"available":false}), "sam2.1-large"));
+        let mut status = json!({"available":true,"models":[{"id":"sam2.1-large","installed":false}]});
+        assert!(!model_choice_available(&status, "sam2.1-large"));
+        status["models"][0]["installed"] = json!(true);
+        assert!(model_choice_available(&status, "sam2.1-large"));
+        assert!(!model_choice_available(&status, "birefnet-hr-matting"));
+    }
     use super::*;
     use std::sync::{Arc, Mutex};
 
@@ -1457,9 +1549,16 @@ mod tests {
                 }
                 let Some(obj) = v.get(sec).and_then(Value::as_object) else { continue };
                 for k in obj.keys() {
-                    let mut labels = vec![humanize(k)];
+                    let mut labels = vec![field_label(sec, k)];
                     labels.extend(prefs::choices(&format!("{sec}.{k}")).into_iter().flatten().map(|c| choice_label(c)));
                     missing.extend(labels.into_iter().filter(|l| !crate::i18n::has(lang, l)));
+                }
+            }
+            for model in session.local_model_status()["models"].as_array().into_iter().flatten() {
+                if let Some(purpose) = model["purpose"].as_str()
+                    && !crate::i18n::has(lang, purpose)
+                {
+                    missing.push(purpose.to_string());
                 }
             }
             missing.sort();
@@ -1727,8 +1826,9 @@ mod tests {
         let values = prefs::Preferences::default().to_json();
         assert!(has_visible_fields(&values, "general"));
         assert!(has_visible_fields(&values, "fileHandling"));
+        assert!(has_visible_fields(&values, "integrations"));
         // Every setting of these sections is still unimplemented.
-        for section in ["type", "enhancedControls", "rawDefaults", "integrations", "scratchDisks"] {
+        for section in ["type", "enhancedControls", "rawDefaults", "scratchDisks"] {
             assert!(!has_visible_fields(&values, section), "{section}");
         }
         assert!(prefs::is_hidden("rawDefaults.applyAutoTone"));

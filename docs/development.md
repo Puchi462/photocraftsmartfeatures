@@ -19,6 +19,10 @@ cargo xtask parity                                         # Photoshop menu cove
 
 Image code is slow at `opt-level 0`, so the workspace profile builds dependencies at `opt-level 2`. Use `--release` for anything interactive.
 
+Optional CPU models for Object Selection, Select Subject and Remove Background are enabled with
+`--features local-ml`. Weights remain separate, explicit downloads. See [local models](local-models.md)
+for Preferences, CLI, provenance and native runtime packaging details.
+
 ## Fonts (craft-fonts)
 
 Font assets shared by the Crafting Apps live in [storytold/craft-fonts](https://github.com/storytold/craft-fonts), never in this repo: don't commit font files here (Inter and JetBrains Mono in `assets/fonts/` are the only exceptions; new fonts go to craft-fonts). The rules are in [`craftrules/standards/fonts.md`](../../craftrules/standards/fonts.md) ([on GitHub](https://github.com/storytold/craftrules/blob/main/standards/fonts.md)).
