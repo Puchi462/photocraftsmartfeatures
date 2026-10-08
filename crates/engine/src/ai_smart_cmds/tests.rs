@@ -95,14 +95,20 @@ fn native_outputs_preserve_existing_mask_and_source() {
 #[test]
 fn native_masks_survive_psd_and_pcraft_save_reopen() {
     for depth in [8, 16, 32] {
-        let mut s = session(depth);
-        s.execute("layer.aiRemoveBackground", json!({})).unwrap();
-        let doc = &s.active().unwrap().doc;
-        let value = doc.layers[0].mask.as_ref().unwrap().value(5, 3);
-        for extension in ["psd", "pcraft"] {
-            let out = photocraft_io::export(doc, extension, &Default::default()).unwrap();
-            let back = photocraft_io::import(&format!("roundtrip.{extension}"), &out.bytes).unwrap().document;
-            assert!((back.layers[0].mask.as_ref().unwrap().value(5, 3) - value).abs() < 0.01, "{extension} {depth}");
+        for (id, params) in [
+            ("layer.aiRemoveBackground", json!({"output":"layerMask"})),
+            ("select.aiObject", json!({"points":[{"position":[8,3]}],"output":"layerMask"})),
+            ("select.aiSubject", json!({"output":"layerMask"})),
+        ] {
+            let mut s = session(depth);
+            s.execute(id, params).unwrap();
+            let doc = &s.active().unwrap().doc;
+            let value = doc.layers[0].mask.as_ref().unwrap().value(5, 3);
+            for extension in ["psd", "pcraft"] {
+                let out = photocraft_io::export(doc, extension, &Default::default()).unwrap();
+                let back = photocraft_io::import(&format!("roundtrip.{extension}"), &out.bytes).unwrap().document;
+                assert!((back.layers[0].mask.as_ref().unwrap().value(5, 3) - value).abs() < 0.01, "{id} {extension} {depth}");
+            }
         }
     }
 }

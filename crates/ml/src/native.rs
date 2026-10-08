@@ -43,7 +43,7 @@ pub struct NativeBackend {
 
 enum Sessions {
     BiRefNet(OnnxSession),
-    Sam2 { encoder: OnnxSession, decoder: OnnxSession, embedding: Option<SamEmbedding> },
+    Sam2 { encoder: OnnxSession, decoder: OnnxSession, embedding: Box<Option<SamEmbedding>> },
 }
 
 struct Loaded {
@@ -296,7 +296,7 @@ impl InferenceBackend for NativeBackend {
                 ModelId::BiRefNet => Sessions::BiRefNet(first),
                 ModelId::Sam2 => {
                     let (decoder, _) = provider_session(&dir.join("prompt_encoder_mask_decoder.onnx"), active)?;
-                    Sessions::Sam2 { encoder: first, decoder, embedding: None }
+                    Sessions::Sam2 { encoder: first, decoder, embedding: Box::new(None) }
                 }
             };
             *loaded = Some(Loaded { id, sessions });
@@ -580,6 +580,11 @@ mod tests {
             fs::write(dir.path().join(name), bytes).unwrap();
         }
         let mut matte = session(&dir.path().join("matte.onnx")).unwrap();
+        // Exercise Auto with the same real runtime. A CPU-only redistribution must fall back;
+        // a GPU-enabled test host may legitimately choose CUDA instead.
+        let (mut automatic, provider) = provider_session(&dir.path().join("matte.onnx"), Provider::Auto).unwrap();
+        assert!(matches!(provider, Provider::Cpu | Provider::Cuda));
+        assert!(birefnet(&mut automatic, vec![0.0; 3 * 2048 * 2048], &Interrupt::NONE).is_ok());
         let alpha = birefnet(&mut matte, vec![0.0; 3 * 2048 * 2048], &Interrupt::NONE).unwrap();
         assert_eq!(alpha.kind, MaskKind::Alpha);
         assert!(alpha.values.iter().all(|v| (*v - 0.5).abs() < 1e-6));
