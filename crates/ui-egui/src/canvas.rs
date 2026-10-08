@@ -1682,7 +1682,7 @@ pub fn canvas_view(app: &mut PhotocraftApp, ui: &mut egui::Ui, idx: usize, rect:
 
     // Selection outline: true boundary, animated marching ants (cached per revision).
     let ai_doc = app.session.ai_preview_document(doc.id).map(|p| p.0);
-    let selection = ai_doc.as_deref().unwrap_or(doc).selection.as_ref();
+    let selection = ai_doc.as_deref().unwrap_or(doc.as_ref()).selection.as_ref();
     if let Some(sel) = selection.filter(|_| app.ui.view.shows(app.ui.view.show.selection_edges) && !polygon_replaces_selection(app)) {
         // Trace at display resolution over the visible part only; key by the mask's tile identity
         // (not the document revision) so unrelated edits don't re-trace it.

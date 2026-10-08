@@ -69,6 +69,9 @@ fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
 }
 impl Request {
     fn parse(cmd: &str, params: &Value, default: Output) -> Result<Self> {
+        if params.get("points").and_then(Value::as_array).is_some_and(|p| p.len() > ObjectPrompt::MAX_POINTS) {
+            return Err(bad(cmd, "at most 64 positive/negative points are supported"));
+        }
         let mut r: Self = serde_json::from_value(if params.is_null() { json!({}) } else { params.clone() }).map_err(|e| bad(cmd, e.to_string()))?;
         r.output.get_or_insert(default);
         for (name, v, lo, hi) in
