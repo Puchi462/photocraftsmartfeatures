@@ -701,6 +701,8 @@ pub struct ColorPanelState {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UiState {
+    #[serde(default)]
+    pub ai: crate::ai_ui::AiUi,
     pub tool: Tool,
     /// Recently opened file paths, most-recent first (File › Open Recent). Capped; de-duplicated.
     #[serde(default)]
@@ -848,6 +850,7 @@ impl Default for UiState {
             recent_files: Vec::new(),
             text_edit: None,
             transform: None,
+            ai: Default::default(),
             mask_target: false,
             vector_mask_target: false,
             brush_picker: None,

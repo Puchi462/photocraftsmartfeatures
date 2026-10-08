@@ -2737,5 +2737,22 @@ cameraRaw	Color	색상
 	Remove download	다운로드 삭제
 	Select Subject and Remove Background; detailed, soft edges	피사체 선택 및 배경 제거; 섬세하고 부드러운 가장자리
 	Object Selection; drag a box around the object	개체 선택; 개체 주위에 상자를 드래그하세요
-Inference device	Inference device
-Release model memory	Release model memory
+	Inference device	Inference device
+	Release model memory	Release model memory
+	AI Remove Background…	AI Remove Background…
+	AI Object Selection…	AI Object Selection…
+	AI Select Subject…	AI Select Subject…
+	Compute AI Preview	Compute AI Preview
+	Decontaminate Colors	Decontaminate Colors
+	Output	Output
+	Click an object, Alt-click to exclude, or drag a box. Apply confirms the preview.	Click an object, Alt-click to exclude, or drag a box. Apply confirms the preview.
+	Reset prompts	Reset prompts
+	replace	replace
+	add	add
+	subtract	subtract
+	intersect	intersect
+	BiRefNet candidates + SAM 2.1	BiRefNet candidates + SAM 2.1
+	Candidate	Candidate
+	Candidate scores estimate prominence, not object-class confidence.	Candidate scores estimate prominence, not object-class confidence.
+	All prominent subjects	All prominent subjects
+	Return to the source document or reopen this AI action.	Return to the source document or reopen this AI action.

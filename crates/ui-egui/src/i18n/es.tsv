@@ -2224,5 +2224,23 @@ cameraRaw	Amount	Cantidad
 	Remove download	Eliminar descarga
 	Select Subject and Remove Background; detailed, soft edges	Seleccionar sujeto y eliminar fondo; bordes suaves y detallados
 	Object Selection; drag a box around the object	Selección de objetos; dibuja un recuadro alrededor del objeto
-Inference device	Dispositivo de inferencia
-Release model memory	Liberar memoria de modelos
+	Inference device	Dispositivo de inferencia
+	Release model memory	Liberar memoria de modelos
+	AI Remove Background…	Quitar fondo con IA…
+	AI Object Selection…	Seleccionar objeto con IA…
+	AI Select Subject…	Seleccionar sujeto con IA…
+	Compute AI Preview	Calcular vista previa con IA
+	Decontaminate Colors	Descontaminar colores
+	Output	Salida
+	New Layer	Capa nueva
+	Click an object, Alt-click to exclude, or drag a box. Apply confirms the preview.	Haz clic en un objeto, Alt-clic para excluir o arrastra una caja. Aplicar confirma la vista previa.
+	Reset prompts	Reiniciar puntos
+	replace	reemplazar
+	add	añadir
+	subtract	restar
+	intersect	intersectar
+	BiRefNet candidates + SAM 2.1	Candidatos BiRefNet + SAM 2.1
+	Candidate	Candidato
+	Candidate scores estimate prominence, not object-class confidence.	Las puntuaciones estiman la prominencia, no la certeza de una clase de objeto.
+	All prominent subjects	Todos los sujetos destacados
+	Return to the source document or reopen this AI action.	Vuelve al documento de origen o abre de nuevo esta acción de IA.
