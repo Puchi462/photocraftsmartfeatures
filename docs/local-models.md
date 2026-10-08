@@ -3,8 +3,8 @@
 PhotoCraft keeps its classical Object Selection, Select Subject and Remove Background methods
 as the defaults. A build with `local-ml` offers two separately downloadable alternatives for
 cases where a larger learned model is useful. Images are processed on the device; downloading
-weights is the only network operation. This first backend uses CPU inference on native desktops,
-including Windows and Linux, without Python, CUDA or a GPU requirement. The web build retains
+weights is the only network operation. This backend defaults to CPU inference on native desktops,
+including Windows and Linux, without Python or a GPU requirement; optional local-ml-cuda builds expose CUDA/Auto. The web build retains
 the classical methods.
 
 | Model | Use | Download | Training input | Licence |
@@ -18,6 +18,9 @@ hair/transparency matting model. BiRefNet may pick several foreground objects. D
 can still need Select and Mask or manual mask edits. HDR values are converted and clipped for
 the model input; original pixels remain unchanged. Canvases are currently limited to 64 MP for
 model commands, and output coverage uses PhotoCraft's existing 8-bit selection/mask format.
+
+See [AI smart selection](ai-smart-selection.md) for the explicit AI actions, previews, point
+prompts, candidate review, optional CUDA provider, commands and qualification limits.
 
 ## Build and use
 

@@ -1,5 +1,9 @@
 # Optional local models: validation
 
+These measurements and screenshots were recorded by the original contributor in
+[upstream PR #1199](https://github.com/storytold/photocraft/pull/1199) and preserved here. They
+were not repeated in this fork. See [ai-smart-selection.md](ai-smart-selection.md) for new checks.
+
 Recorded 2026-10-08 on an Apple M3 Max with 36 GiB RAM, Rust 1.98.0, native CPU inference
 and the immutable model exports listed in [local-models.md](local-models.md). No learned weights
 are included in this repository. This is an initial integration and performance check, not a

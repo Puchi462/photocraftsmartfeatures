@@ -20,6 +20,28 @@ impl ClientHandler for Client {
     }
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn ai_commands_are_discoverable_without_granting_headless_model_authority() {
+    let client = connect(PhotocraftMcp::headless()).await;
+    let commands = json_of(&call(&client, "command_list", json!({})).await);
+    for id in ["select.aiSubject", "select.aiObject", "layer.aiRemoveBackground", "models.device", "models.release", "ai.apply", "ai.discard", "ai.previewInfo"]
+    {
+        assert!(commands.as_array().unwrap().iter().any(|c| c["id"] == id), "{id}");
+    }
+    let status = json_of(&call(&client, "command_run", json!({"id": "models.list"})).await);
+    assert_eq!(status["available"], false);
+    json_of(&call(&client, "doc_new", json!({"width": 12, "height": 6})).await);
+    let before = json_of(&call(&client, "doc_inspect", json!({})).await);
+    for id in ["select.aiSubject", "select.aiObject", "layer.aiRemoveBackground", "models.download"] {
+        let error = call(&client, "command_run", json!({"id": id, "params": {}, "wait": false})).await;
+        assert_eq!(error.is_error, Some(true), "{}: {}", id, text(&error));
+    }
+    let invalid = call(&client, "command_run", json!({"id": "select.aiObject", "params": [1,2]})).await;
+    assert_eq!(invalid.is_error, Some(true), "{}", text(&invalid));
+    assert_eq!(before, json_of(&call(&client, "doc_inspect", json!({})).await));
+    client.cancel().await.unwrap();
+}
+
 async fn connect(server: PhotocraftMcp) -> RunningService<RoleClient, Client> {
     let (s, c) = tokio::io::duplex(1 << 20);
     tokio::spawn(async move {
