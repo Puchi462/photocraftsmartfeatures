@@ -76,10 +76,21 @@ fn native_outputs_preserve_existing_mask_and_source() {
     assert!(s.active().unwrap().doc.selection.is_some());
     assert!(s.active().unwrap().doc.layers[0].mask.is_none());
     let mut s = session(16);
+    s.edit("source appearance", |doc, _| {
+        doc.layers[0].fill_opacity = 0.65;
+        doc.layers[0].psd_id = Some(777);
+        Ok(())
+    })
+    .unwrap();
+    let source_id = s.active().unwrap().doc.layers[0].id;
     s.execute("layer.aiRemoveBackground", json!({"output":"newLayer"})).unwrap();
     assert_eq!(s.active().unwrap().doc.layers.len(), 2);
     assert!(!s.active().unwrap().doc.layers[0].visible);
     assert!(s.active().unwrap().doc.layer(s.active().unwrap().active_layer.unwrap()).unwrap().mask.is_some());
+    let copy = s.active().unwrap().doc.layer(s.active().unwrap().active_layer.unwrap()).unwrap();
+    assert_ne!(copy.id, source_id);
+    assert_eq!(copy.fill_opacity, 0.65);
+    assert!(copy.psd_id.is_none());
 }
 #[test]
 fn native_masks_survive_psd_and_pcraft_save_reopen() {
@@ -126,10 +137,11 @@ fn object_selection_combines_native_coverage() {
     let mut s = session(8);
     let params = json!({"points":[{"position":[8,3]}]});
     s.execute("select.aiObject", params.clone()).unwrap();
-    let original = s.active().unwrap().doc.selection.clone().unwrap();
+    let bounds = s.active().unwrap().doc.bounds();
+    let original = s.active().unwrap().doc.selection.as_ref().unwrap().read_region(bounds);
     for mode in ["add", "intersect"] {
         s.execute("select.aiObject", json!({"points":[{"position":[8,3]}],"mode":mode})).unwrap();
-        assert_eq!(s.active().unwrap().doc.selection.as_ref().unwrap(), &original);
+        assert_eq!(s.active().unwrap().doc.selection.as_ref().unwrap().read_region(bounds), original);
     }
     s.execute("select.aiObject", json!({"points":[{"position":[8,3]}],"mode":"subtract"})).unwrap();
     assert!(s.active().unwrap().doc.selection.is_none());

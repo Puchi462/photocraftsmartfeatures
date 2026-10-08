@@ -142,8 +142,8 @@ params and wait=false. No arbitrary model URLs/paths are accepted by engine comm
 | MCP verification | crates/automation/tests/mcp.rs |
 | Documentation | This guide, local-models guides, provenance and generated parity |
 
-A pre-existing nonminimal Boolean expression in text/cjk.rs was simplified to let Rust 1.95
-Clippy run without warnings; its language-selection behavior is unchanged.
+Pre-existing style warnings in text/cjk.rs and plugins/manifest.rs were simplified for
+Rust 1.95 Clippy without changing language selection or plugin validation behavior.
 
 ## Remaining validation and limitations
 

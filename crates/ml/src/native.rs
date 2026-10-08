@@ -38,6 +38,7 @@ pub struct NativeBackend {
     operations: [Mutex<()>; 2],
     sessions: Mutex<Option<Loaded>>,
     provider: Mutex<Provider>,
+    active_provider: Mutex<Provider>,
 }
 
 enum Sessions {
@@ -48,7 +49,6 @@ enum Sessions {
 struct Loaded {
     id: ModelId,
     sessions: Sessions,
-    active: Provider,
 }
 
 struct Embedding {
@@ -104,7 +104,13 @@ impl Transport for IdleTransport {
 
 impl NativeBackend {
     pub fn new(root: PathBuf) -> Self {
-        Self { root, operations: Default::default(), sessions: Mutex::new(None), provider: Mutex::new(Provider::Cpu) }
+        Self {
+            root,
+            operations: Default::default(),
+            sessions: Mutex::new(None),
+            provider: Mutex::new(Provider::Cpu),
+            active_provider: Mutex::new(Provider::Cpu),
+        }
     }
 
     fn directory(&self, id: ModelId) -> PathBuf {
@@ -148,7 +154,7 @@ impl NativeBackend {
 impl InferenceBackend for NativeBackend {
     fn device(&self) -> DeviceStatus {
         let requested = *self.provider.lock().unwrap_or_else(PoisonError::into_inner);
-        let active = self.sessions.try_lock().ok().and_then(|l| l.as_ref().map(|l| l.active)).unwrap_or(Provider::Cpu);
+        let active = *self.active_provider.lock().unwrap_or_else(PoisonError::into_inner);
         DeviceStatus { requested, active, cuda_compiled: cfg!(feature = "cuda") }
     }
 
@@ -161,6 +167,7 @@ impl InferenceBackend for NativeBackend {
         if *current != provider {
             *loaded = None;
             *current = provider;
+            *self.active_provider.lock().unwrap_or_else(PoisonError::into_inner) = Provider::Cpu;
         }
         Ok(())
     }
@@ -168,6 +175,7 @@ impl InferenceBackend for NativeBackend {
     fn release(&self) -> Result<()> {
         let mut loaded = self.sessions.try_lock().map_err(|_| Error::Unavailable("wait for inference to finish before releasing models".into()))?;
         *loaded = None;
+        *self.active_provider.lock().unwrap_or_else(PoisonError::into_inner) = Provider::Cpu;
         Ok(())
     }
 
@@ -279,6 +287,7 @@ impl InferenceBackend for NativeBackend {
         };
         if loaded.as_ref().is_none_or(|l| l.id != id) {
             *loaded = None;
+            *self.active_provider.lock().unwrap_or_else(PoisonError::into_inner) = Provider::Cpu;
             check(ctl)?;
             let dir = self.directory(id);
             let provider = *self.provider.lock().unwrap_or_else(PoisonError::into_inner);
@@ -290,7 +299,8 @@ impl InferenceBackend for NativeBackend {
                     Sessions::Sam2 { encoder: first, decoder, embedding: None }
                 }
             };
-            *loaded = Some(Loaded { id, sessions, active });
+            *loaded = Some(Loaded { id, sessions });
+            *self.active_provider.lock().unwrap_or_else(PoisonError::into_inner) = active;
         }
         check(ctl)?;
         ctl.progress(0.2);
@@ -603,6 +613,18 @@ mod tests {
         assert!(!temp.path().join("models").exists());
         #[cfg(not(feature = "cuda"))]
         assert!(backend.configure(Provider::Cuda).is_err());
+    }
+
+    #[test]
+    fn querying_a_busy_backend_keeps_the_active_provider() {
+        let temp = tempfile::tempdir().unwrap();
+        let backend = NativeBackend::new(temp.path().join("models"));
+        *backend.active_provider.lock().unwrap() = Provider::Cuda;
+        let busy = backend.sessions.lock().unwrap();
+        assert_eq!(backend.device().active, Provider::Cuda);
+        drop(busy);
+        backend.release().unwrap();
+        assert_eq!(backend.device().active, Provider::Cpu);
     }
 
     #[test]

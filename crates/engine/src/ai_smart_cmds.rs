@@ -3,7 +3,7 @@ use crate::commands::CommandSpec;
 use crate::{EngineError, Result, Session};
 use photocraft_algo::matting::{self, RefineParams};
 use photocraft_algo::selection::{Region, SelectionMode, combine_region};
-use photocraft_doc::{DocId, Document, Layer, LayerContent, LayerId, LayerMask};
+use photocraft_doc::{DocId, Document, LayerContent, LayerId, LayerMask};
 use photocraft_ml::{ModelId, ObjectPrompt, PointPrompt, Prompt, candidates::Candidate};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -164,9 +164,9 @@ fn apply_region(doc: &mut Document, active: &mut Option<LayerId>, layer: Option<
             return Err(EngineError::Other("decontamination is limited to 16 megapixels; reduce the canvas or turn it off".into()));
         }
         let pixels = if r.decontaminate { matting::decontaminate(pixels, region, r.edge_radius.max(4.0), 100.0) } else { pixels.clone() };
-        let mut copy = Layer::new(format!("{} AI", source.name), LayerContent::Raster(pixels));
-        copy.opacity = source.opacity;
-        copy.blend = source.blend;
+        let mut copy = source.duplicate();
+        copy.name = format!("{} AI", source.name);
+        copy.content = LayerContent::Raster(pixels);
         copy.mask = Some(mask);
         let new_id = doc.insert_above(Some(id), copy);
         if let Some(source) = doc.layer_mut(id) {
